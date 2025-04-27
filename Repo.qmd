@@ -1,0 +1,239 @@
+---
+title: "UNICEF World Issue Report"
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+jupyter: python3
+theme: cosmo
+execute:
+  echo: false
+  warning: false
+
+---
+
+
+# 🌍 Introduction
+
+**Global inequalities** remain a major challenge.  
+This report highlights key indicators based on UNICEF data.  
+It includes **visual evidence** to raise awareness about issues like GDP inequality, child mortality, and healthcare access.
+
+## ✍️ Report By
+<div align="center">
+**<span style="font-size:22px">Anushree Sudhakar Gaikwad</span>**  
+<span style="font-size:18px; color:gray;">Student ID: 15730 &nbsp;|&nbsp; Course: MSBM</span>
+</div>
+
+# 📂 Data Preparation
+
+```{python}
+# Import libraries
+import pandas as pd
+import geopandas as gpd
+import geodatasets
+import plotnine as p9
+from plotnine import *
+from shapely.geometry import Polygon, MultiPolygon
+
+# Load datasets
+indicator1 = pd.read_csv("unicef_indicator_1.csv")
+indicator2 = pd.read_csv("unicef_indicator_2.csv")
+metadata = pd.read_csv("unicef_metadata.csv")
+
+# Convert 'obs_value' to numeric
+indicator1["obs_value"] = pd.to_numeric(indicator1["obs_value"], errors="coerce")
+indicator2["obs_value"] = pd.to_numeric(indicator2["obs_value"], errors="coerce")
+
+# Clean metadata
+metadata_clean = metadata.rename(columns={
+    'year': 'time_period',
+    'GDP per capita (constant 2015 US$)': 'GDP_per_capita',
+    'Life expectancy at birth, total (years)': 'Life_expectancy',
+    'Birth rate, crude (per 1,000 people)': 'Birth_rate'
+})
+
+# Merge indicator1 with metadata
+merged = indicator1.merge(metadata_clean, on=['country', 'time_period'], how='left')
+merged = merged.dropna(subset=['GDP_per_capita', 'Life_expectancy'])
+```
+# 📈 Visualizations
+
+
+## 1. 📊 Top 10 Countries with the Highest Average Child Poverty Rates
+```{python}
+
+# Bar chart for Top 10 Countries by Child Poverty
+top10 = merged.groupby("country")["obs_value"].mean().sort_values(ascending=False).head(10).reset_index()
+
+(
+    p9.ggplot(top10, p9.aes(x="reorder(country, obs_value)", y="obs_value", label="round(obs_value, 1)"))
+    + p9.geom_col(fill="#fb8500")
+    + p9.geom_text(position=p9.position_stack(vjust=0.5), size=8, color="white")
+    + p9.coord_flip()
+    + p9.theme_minimal()
+    + p9.labs(
+        title="Top 10 Countries with the Highest Average Child Poverty Rates",
+        x="Country",
+        y="Average Child Poverty (%)"
+    )
+)
+```
+
+The bar chart highlights the top 10 countries with the highest average child poverty rates. These countries show significantly higher vulnerability levels compared to global averages.
+
+## 2. 🌍 World Map Visualization of GDP per Capita Distribution (2018)
+```{python}
+
+# Load world map
+# 🗺️ Load World Map (GeoJSON)
+world = gpd.read_file('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson')
+
+# 📂 Load UNICEF metadata
+metadata = pd.read_csv("unicef_metadata.csv")
+
+# 🧹 Clean metadata
+metadata_clean = metadata.rename(columns={
+    'year': 'time_period',
+    'GDP per capita (constant 2015 US$)': 'GDP_per_capita',
+    'Life expectancy at birth, total (years)': 'Life_expectancy',
+    'Birth rate, crude (per 1,000 people)': 'Birth_rate'
+})
+
+# 🎯 Filter 2018
+metadata_2018 = metadata_clean[metadata_clean['time_period'] == 2018]
+
+# 🔗 Merge datasets
+world_merged = world.merge(metadata_2018, left_on='ISO_A3', right_on='alpha_3_code', how='left')
+
+# 🚿 Drop missing GDP
+world_merged = world_merged.dropna(subset=['GDP_per_capita'])
+
+# 💥 Explode multipolygons into polygons
+world_merged = world_merged.explode(index_parts=True)
+
+# 🧹 Build dataframe for plotting
+records = []
+for idx, row in world_merged.iterrows():
+    geom = row.geometry
+    if geom is None:
+        continue
+    if isinstance(geom, Polygon):
+        coords = list(geom.exterior.coords)
+    elif isinstance(geom, MultiPolygon):
+        coords = []
+        for poly in geom.geoms:
+            coords.extend(list(poly.exterior.coords))
+    for x, y in coords:
+        records.append({
+            'x': x,
+            'y': y,
+            'group': row['ISO_A3'],
+            'GDP_per_capita': row['GDP_per_capita']
+        })
+
+# Now make it a DataFrame
+world_points = pd.DataFrame(records)
+
+# 🌍 Plot World Map
+(
+    ggplot(world_points)
+    + geom_polygon(aes(x='x', y='y', group='group', fill='GDP_per_capita'), color='white')
+    + coord_equal()
+    + theme_void()
+    + scale_fill_continuous(name='GDP per Capita (log scale)', trans='log')
+    + labs(
+        title='World Map: GDP per Capita (2018)',
+        subtitle='Data source: UNICEF & World Bank',
+        caption='Natural Earth via GeoJSON'
+    )
+)
+
+```
+This world map shows the global distribution of GDP per capita in 2018. Wealthier regions are clustered in North America, Europe, and East Asia, while many African nations show lower GDP levels.
+
+## 3. 🔵 Relationship Between GDP per Capita and Child ART Coverage
+
+```{python}
+# Scatter Plot: GDP vs ART Coverage
+indicator_2018 = indicator1[indicator1['time_period'] == 2018]
+merged_data = indicator_2018.merge(metadata_clean, on=['country', 'alpha_3_code', 'time_period'], how='left')
+
+(
+    ggplot(merged_data, aes(x='GDP_per_capita', y='obs_value'))
+    + geom_point()
+    + geom_smooth(method='lm', color='red')
+    + theme_minimal()
+    + labs(
+        title='Relationship Between GDP per Capita and Child ART Coverage',
+        x='GDP per Capita (USD)',
+        y='% of Children Receiving ART'
+    )
+)
+```
+The scatter plot with regression line shows that countries with higher GDP per capita tend to have higher child ART coverage, indicating better healthcare access in wealthier nations.
+
+## 4. 📈 Life Expectancy Trends in Selected Countries
+```{python}
+
+
+# Step 8: Time Series Chart — Life Expectancy Trends (Selected Countries)
+
+# Select a few countries
+selected_countries = ['India', 'South Africa', 'United States', 'Nigeria', 'Brazil']
+timeseries_data = metadata_clean[metadata_clean['country'].isin(selected_countries)]
+
+# Drop missing Life Expectancy values
+timeseries_data = timeseries_data.dropna(subset=['Life_expectancy'])
+
+# Find first and last year for each country
+first_last_years = timeseries_data.groupby('country').agg(
+    first_year=('time_period', 'min'),
+    last_year=('time_period', 'max')
+).reset_index()
+
+# Select rows where year == first year OR last year
+highlight_points = timeseries_data[
+    (timeseries_data.set_index(['country', 'time_period']).index.isin(
+        list(zip(first_last_years['country'], first_last_years['first_year']))
+    )) |
+    (timeseries_data.set_index(['country', 'time_period']).index.isin(
+        list(zip(first_last_years['country'], first_last_years['last_year']))
+    ))
+]
+
+# Create a label column
+highlight_points = highlight_points.copy()
+highlight_points['Life_expectancy_label'] = highlight_points['Life_expectancy'].round(1)
+
+# Plot
+(
+    ggplot(timeseries_data, aes(x='time_period', y='Life_expectancy', color='country'))
+    + geom_line(size=1.2)   # ⬅ Slightly thicker, still neat
+    + geom_point(data=highlight_points, size=3)
+    + geom_text(
+        data=highlight_points,
+        mapping=aes(label='Life_expectancy_label'),
+        va='bottom',
+        ha='left',
+        size=6,
+        nudge_y=0.5
+    )
+    + theme_minimal()
+    + labs(
+        title='Life Expectancy Over Time',
+        x='Year',
+        y='Life Expectancy (Years)'
+    )
+)
+```
+The time series plot shows consistent improvements in life expectancy across all selected countries, although the pace varies significantly among them.
+
+# 📜 Conclusion
+
+
+Child poverty remains critically high in several nations.
+
+Higher GDP per capita correlates strongly with better health and education outcomes.
+
+Efforts to close the global inequality gap must focus on economic development and healthcare accessibility.
